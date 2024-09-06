@@ -4220,17 +4220,22 @@ bool ValueDecl::isUsableFromInline() const {
 
 bool ValueDecl::isInterfacePackageEffectivelyPublic() const {
   // If a package decl has a @usableFromInline (or other inlinable)
-  // attribute, and is defined in a module built from interface, it
-  // can be referenced by another module that imports it even though
-  // the defining interface module does not have package-name (such
-  // as public or private interface); in such case, the decl is treated
-  // as public and access checks in sema are skipped.
+  // attribute, and is defined in an interface module (or built from
+  // interface), it can be referenced by another module that imports
+  // it even though the defining interface module does not have
+  // package-name (public/private interface); in such case, the decl
+  // is treated as public and access checks in sema are skipped.
   // We might need to add another check here to ensure the interface
   // was part of the same package before the package-name was removed.
-  return getFormalAccess() == AccessLevel::Package &&
-         isUsableFromInline() &&
-         getModuleContext()->getPackageName().empty() &&
-         getModuleContext()->isBuiltFromInterface();
+  auto isCandidate = getFormalAccess() == AccessLevel::Package &&
+                     isUsableFromInline() &&
+                     getModuleContext()->getPackageName().empty();
+  if (!isCandidate)
+    return false;
+  if (auto srcFile = getDeclContext()->getParentSourceFile()) {
+    isCandidate = srcFile->Kind == SourceFileKind::Interface;
+  }
+  return isCandidate || getModuleContext()->isBuiltFromInterface();
 }
 
 bool ValueDecl::shouldHideFromEditor() const {
@@ -4512,9 +4517,9 @@ getAccessScopeForFormalAccess(const ValueDecl *VD,
     if (!pkg) {
       if (VD->isInterfacePackageEffectivelyPublic())
         return AccessScope::getPublic();
-      // Instead of reporting and failing early, return the scope of resultDC to
-      // allow continuation (should still non-zero exit later if in script mode)
-      return AccessScope(resultDC);
+
+      // If reached here, should be treated as internal.
+      return AccessScope(resultDC->getParentModule());
     } else {
       return AccessScope(pkg);
     }
